@@ -22,7 +22,6 @@ PT NSM/
 *.json
 .xml
 .xlsx
-.csv
 .db
 .backup
 .env
