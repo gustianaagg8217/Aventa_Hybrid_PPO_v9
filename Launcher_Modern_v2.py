@@ -145,17 +145,18 @@ def get_mt5_account_info() -> Optional[Dict[str, Any]]:
 
 # ==================== MODERN BOT CARD WIDGET ====================
 
-class BotCard(ttk.Frame):
+class BotCard(tk.Frame):
     """Modern card widget for displaying bot information"""
     
-    def __init__(self, parent, bot_index: int, config: Optional[Dict] = None):
-        super().__init__(parent, relief=ttk.RIDGE, borderwidth=1)
+    def __init__(self, parent, bot_index: int, config: Optional[Dict] = None, parent_app=None):
+        super().__init__(parent, relief=tk.RIDGE, borderwidth=1, bg='#f5f5f5')
         self.bot_index = bot_index
         self.process: Optional[subprocess.Popen] = None
         self.config_data = config or {}
         self.status_var = tk.StringVar(value="Stopped")
         self.window_status_thread = None
         self.window_status_stop = threading.Event()
+        self.parent_app = parent_app
         
         self._create_widgets()
     
@@ -165,11 +166,11 @@ class BotCard(ttk.Frame):
         header = ttk.Frame(self)
         header.pack(fill=tk.X, padx=10, pady=10)
         
-        title = ttk.Label(
+        self.title_label = ttk.Label(
             header, text=f"Bot #{self.bot_index}", 
             font=("Segoe UI", 12, "bold")
         )
-        title.pack(side=tk.LEFT)
+        self.title_label.pack(side=tk.LEFT)
         
         self.status_label = ttk.Label(
             header, textvariable=self.status_var,
@@ -237,6 +238,12 @@ class BotCard(ttk.Frame):
             command=self._show_advanced
         )
         config_btn.pack(side=tk.LEFT, padx=5)
+        
+        delete_btn = ttk.Button(
+            btn_frame, text="🗑️ Remove",
+            command=self._delete_bot
+        )
+        delete_btn.pack(side=tk.LEFT, padx=5)
         
         # Window status
         status_frame = ttk.LabelFrame(self, text="Window Status", padding=10)
@@ -392,6 +399,31 @@ class BotCard(ttk.Frame):
             'max_open_trades': getattr(self, 'max_open_trades_var', tk.StringVar()).get(),
             'max_spread': getattr(self, 'max_spread_var', tk.StringVar()).get(),
         }
+    
+    def _delete_bot(self) -> None:
+        """Remove this bot from the launcher"""
+        response = messagebox.askyesno(
+            "Remove Bot",
+            f"Are you sure you want to remove Bot #{self.bot_index}?"
+        )
+        
+        if response:
+            self._stop_bot()
+            time.sleep(0.5)
+            
+            if hasattr(self.parent_app, 'bots'):
+                try:
+                    self.parent_app.bots.remove(self)
+                    self.destroy()
+                    logger.info(f"Bot #{self.bot_index} removed successfully")
+                    
+                    # Renumber remaining bots
+                    for idx, bot in enumerate(self.parent_app.bots, 1):
+                        bot.bot_index = idx
+                        bot.title_label.config(text=f"Bot #{idx}")
+                except Exception as e:
+                    logger.error(f"Error removing bot: {e}")
+                    messagebox.showerror("Error", f"Failed to remove bot: {e}")
 
 # ==================== MAIN APPLICATION ====================
 
@@ -441,9 +473,16 @@ class ModernLauncher(tk.Tk):
             font=("Segoe UI", 10, "italic")
         ).pack(side=tk.LEFT, padx=10)
         
+        # Bottom control panel (ATAS tab)
+        self._create_control_panel()
+        
+        # Separator line
+        separator = ttk.Separator(self, orient=tk.HORIZONTAL)
+        separator.pack(fill=tk.X, padx=20, pady=5)
+        
         # Create notebook for tabs
         self.notebook = ttk.Notebook(self)
-        self.notebook.pack(fill=tk.BOTH, expand=True, padx=20, pady=(0, 20))
+        self.notebook.pack(fill=tk.BOTH, expand=True, padx=20, pady=(0, 10))
         
         # Tab 1: Bot Management
         self._create_bot_management_tab()
@@ -456,32 +495,17 @@ class ModernLauncher(tk.Tk):
         
         # Tab 4: Info
         self._create_info_tab()
-        
-        # Bottom control panel
-        self._create_control_panel()
     
     def _create_bot_management_tab(self) -> None:
         """Create bot management tab"""
         tab = ttk.Frame(self.notebook)
         self.notebook.add(tab, text="🤖 Bot Management")
         
-        # Scrollable frame for bots
-        canvas = tk.Canvas(tab, bg="white", highlightthickness=0)
-        scrollbar = ttk.Scrollbar(tab, orient="vertical", command=canvas.yview)
+        # Frame with scrollbar using mousewheel_support
+        self.bot_container = tk.Frame(tab, bg="white")
+        self.bot_container.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
-        self.bot_container = ttk.Frame(canvas, padding=10)
-        self.bot_container.bind(
-            "<Configure>",
-            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
-        )
-        
-        canvas.create_window((0, 0), window=self.bot_container, anchor="nw")
-        canvas.configure(yscrollcommand=scrollbar.set)
-        
-        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        
-        # Add first bot
+        # Add initial bot
         self._add_bot_card()
     
     def _create_settings_tab(self) -> None:
@@ -578,7 +602,8 @@ class ModernLauncher(tk.Tk):
             ttk.Label(features_frame, text=feature).pack(anchor=tk.W, pady=3)
     
     def _create_control_panel(self) -> None:
-        """Create bottom control panel"""
+        """Create control panel with all buttons"""
+        # Control panel frame
         panel = ttk.Frame(self)
         panel.pack(fill=tk.X, padx=20, pady=10)
         
@@ -607,7 +632,7 @@ class ModernLauncher(tk.Tk):
     def _add_bot_card(self) -> None:
         """Add new bot card"""
         bot_index = len(self.bots) + 1
-        bot = BotCard(self.bot_container, bot_index)
+        bot = BotCard(self.bot_container, bot_index, parent_app=self)
         bot.pack(fill=tk.X, pady=10)
         self.bots.append(bot)
         logger.info(f"Added bot #{bot_index}")
@@ -700,7 +725,7 @@ class ModernLauncher(tk.Tk):
             
             # Load saved configs
             for config in configs:
-                bot = BotCard(self.bot_container, len(self.bots) + 1, config)
+                bot = BotCard(self.bot_container, len(self.bots) + 1, config, parent_app=self)
                 bot.pack(fill=tk.X, pady=10)
                 self.bots.append(bot)
             
